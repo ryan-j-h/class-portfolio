@@ -1,0 +1,195 @@
+---
+title: "Homework 3"
+author: "Speed_Readrs: Ryan, Jason, Mishek"
+date: "June 11th, 2020"
+output: 
+  html_document:
+    css: hw3.css
+    toc: true
+    number_sections: false
+    toc_float: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, comment = NA, message = FALSE, 
+                      warning = FALSE)
+```
+
+```{r packages}
+library(tidyverse)
+library(DT)
+library(mapview)
+library(sf)
+```
+
+
+```{r load_data}
+sheetz <- readRDS("data/sheetz/sheetz.rds")
+wawa <- readRDS("data/wawa/wawa.rds")
+counties <- readRDS("data/pacounties/pacounties.rds")
+```
+
+# Sheetz Stores
+
+## Scraping Methods
+ 
+To get data about each Sheetz location, we first scraped the homepage for links 
+to each region of Sheetz stores, filtering out any phony links. We created a 
+function to scrape information for all stores in a given section; this function 
+read a section page in JSON format and converted it to a list, defined a helper 
+function to convert an individual store's list to a row, and then constructed a 
+dataframe of all stores in a section. We ran this code for all ten sections.
+
+To parse the data, we cleaned the names of the variables, selected variables we 
+wanted to use or display (store number, address, city, state, latitude, and 
+longitude) and converted the data to a simple features object.
+
+## Data
+
+Here are the addresses of all the Sheetz stores in Pennsylvania.
+
+<br>
+
+```{r sheetz_logo, out.width = "200px"}
+knitr::include_graphics("images/sheetz-logo.png")
+```
+<br><br>
+
+```{r preview_sheetz}
+datatable(sheetz, 
+          rownames = FALSE, 
+          filter="top", 
+          options = list(pageLength = 5, scrollX=T) )
+```
+
+
+# Wawa Stores
+
+## Scraping Methods
+The wawa stores dataset was scraped as if it came from a web API using the 
+JSON lite package. The steps we took consisted of first running a function that 
+scraped the potential web pages into a list then converting it into a dataframe. 
+We used the safely function to deal with the potential pages that did not have a 
+Wawa store. 
+
+## Data
+
+Here are the addresses of all the Wawa stores in Pennsylvania.
+
+
+<br>
+
+
+```{r wawa logo, out.width = "200px"}
+knitr::include_graphics("images/wawa-logo.png")
+```
+<br><br>
+
+```{r wawa}
+datatable(wawa, 
+          rownames = FALSE, 
+          filter="top", 
+          options = list(pageLength = 5, scrollX=T) )
+```
+
+
+# Turf War
+
+## Overview
+
+Here is a map of all the Sheetz and Wawa stores in Pennsylvania.
+
+<br>
+
+```{r create_layers}
+sheetz_map   <- mapview(sheetz, col.regions = "#FF3333",
+                        label = str_c(sheetz$address , ", ", sheetz$city),
+                        layer.name = "Sheetz")
+
+wawa_map     <- mapview(wawa, col.regions = "#FFC300",
+                        label = str_c(wawa$address, ", ", wawa$city),
+                        layer.name = "Wawa")
+
+counties_map <- mapview(counties, col.region = "#000000", 
+                        alpha = 0.5, alpha.fill = 0.05, 
+                        label = counties$county_nam, 
+                        layer.name = "Counties")
+```
+
+<center>
+```{r display_map}
+counties_map + sheetz_map + wawa_map
+```
+</center>
+
+## Contested Territory
+
+We classify counties, calling contested any county that contains both a Sheetz 
+and a Wawa.
+
+<center>
+```{r classify_counties}
+contested_counties <- counties[sheetz, ] %>%
+                        .[wawa, ]
+
+sheetz_counties    <- counties[sheetz, ] %>% 
+                        filter(!(county_nam %in% contested_counties$county_nam))
+
+wawa_counties      <- counties[wawa,] %>% 
+                        filter(!(county_nam %in% contested_counties$county_nam))
+
+contested_sheetz   <- sheetz[contested_counties, ]
+
+contested_wawa     <- wawa[contested_counties, ]
+
+sheetz_counties_map    <- mapview(sheetz_counties, col.region = "#FF3333", 
+                            alpha = 0.5, alpha.fill = 0.2, 
+                            label = sheetz_counties$county_nam, 
+                            layer.name = "Sheetz Counties")
+
+wawa_counties_map      <- mapview(wawa_counties, col.region = "#FFC300", 
+                            alpha = 0.5, alpha.fill = 0.2, 
+                            label = wawa_counties$county_nam, 
+                            layer.name = "Wawa Counties")
+
+contested_counties_map <- mapview(contested_counties, col.region = "blue", 
+                            alpha = 0.5, alpha.fill = 0.2, 
+                            label = contested_counties$county_nam, 
+                            layer.name = "Contested Counties")
+
+contested_sheetz_map   <- mapview(contested_sheetz, col.region = "#FF3333",
+                            label = str_c(contested_sheetz$address, ", ", 
+                                          contested_sheetz$city),
+                            layer.name = "Contested Sheetz")
+
+contested_wawa_map     <- mapview(contested_wawa, col.region = "#FFC300",
+                            label = str_c(contested_wawa$address, ", ", 
+                                          contested_wawa$city),
+                            layer.name = "Contested Wawas")
+
+sheetz_counties_map + wawa_counties_map + contested_counties_map +
+  contested_sheetz_map + contested_wawa_map
+```
+</center>
+
+
+The counties that contain both Sheetz and Wawa are Lancaster, Berks, Lehigh and 
+Northampton. Lancaster and Berks counties are truly contested, as there are 
+several Sheetz and several Wawas. This is where the turf war converges. Lehigh 
+and Northampton counties, however, are really part of Wawa territory with a few
+Sheetz infiltrators, as they contain two or fewer Sheetz, and Carbon and Monroe 
+counties to the north are Wawa counties.
+
+Thus, the two brands are not completely inseparable, but there appears to be a 
+division of territories of the two gas station brands in Pennsylvania. Wawa 
+is predominant in the southeastern portion of the state, in the Philadelphia 
+metropolitan area and its suburbs. Sheetz is more prominent throughout the rest
+of the state. Thus divisions in the two companies can be visually identified in 
+the state of Pennsylvania. 
+
+
+### References
+
+Pennsylvania county data from 
+https://www.pasda.psu.edu/uci/DataSummary.aspx?dataset=24

@@ -1,0 +1,241 @@
+---
+title: "Logistic Regression"
+author: "Ryan Hastings"
+date: "March 2020"
+output: pdf_document
+---
+
+Homework for STA 210: Regression Analysis
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning=FALSE, 
+                      message=FALSE)
+```
+
+## Load packages
+
+```{r load-packages}
+library(tidyverse)
+library(broom)
+library(knitr) 
+library(pROC)
+library(plotROC)
+library(patchwork)
+```
+
+
+I use the email dataset to create a simple spam filter that uses characteristics of an email to determine if an email is considered spam. 
+
+We will use the following variables in the analysis:
+
+* `spam`: Indicator for whether the email was spam.
+
+* `to_multiple`: Indicator for whether the email was addressed to more than one recipient.
+
+* `num_char`: The number of characters in the email, in thousands.
+
+* `number`: Factor variable saying whether there was no number, a small number (under 1 million), or a big number.
+
+First, I load the data, preview it, and change the type of some of the variables.
+
+```{r load-data}
+email <- read_csv("data/email.csv")
+glimpse(email)
+email = email %>%
+  mutate(spam = as.factor(spam), to_multiple = as.factor(to_multiple))
+```
+
+### Exploratory Data Analysis
+
+Next, I conduct univariate and bivariate exploratory data analysis.
+
+
+#### Univariate EDA
+
+```{r num_char, fig.align='center'}
+p1 <- email %>%
+  ggplot()+
+  geom_bar(mapping=aes(x=spam))+
+  labs(title="Were the Emails Spam?", x="0: No, 1: Yes")
+p2<- email %>%
+  ggplot()+
+  geom_bar(mapping=aes(x=to_multiple))+
+  labs(title="Adressed to Multiple Participants?", x="0: No, 1: Yes")
+p3 <- email %>%
+  ggplot()+
+  geom_histogram(mapping=aes(x=num_char))+
+  labs(title="Number of Characters", x="Number of Characters in Email, in 1000s")
+p4 <- email %>%
+  ggplot()+
+  geom_bar(mapping=aes(x=number))+
+  labs(title="Number", x="None, small (< 1 million), or big")
+p1 + (p2 / p3 / p4)
+
+
+email %>%
+  group_by(spam)%>%
+  summarize(count=n())%>%
+  kable(format="markdown")
+
+email %>%
+  group_by(to_multiple)%>%
+  summarize(count=n())%>%
+  kable(format="markdown")
+
+email %>%
+  summarize(count=n(),
+            median=median(num_char),
+            iqr=IQR(num_char))%>%
+  kable(format="markdown")
+
+email %>%
+  group_by(number)%>%
+  summarize(count=n())%>%
+  kable(format="markdown")
+```
+The distribution of spam is depicted, with 367 out of 3921 emails being marked as spam. There appear to be significantly more emails that are not spam.
+
+The distribution of to_multiple is depicted, with 3301 being sent to only one recipient and 620 being sent to multiple recipients. There appear to be significantly more emails that are sent to only one recipient.
+
+The distribution of num_char is depicted. The data appear to be skewed right, with a median of 5,856 characters and an IQR of 12,625 characters.
+
+The distribution of number is depicted. There are 545 with a big number, 549 with no number, and 2827 with a small number. There appear to be significantly more with a small number than in the other two categories.
+
+#### Bivariate EDA
+
+```{r bivEDA, fig.align='center'}
+p6 <- ggplot(data = email, aes(x = spam, fill = to_multiple)) +
+  geom_bar(position = "fill") +
+  labs(y = "Proportion", 
+       title = "To Multiple Recipients vs. Spam") +
+  coord_flip()
+p7 <- ggplot(data = email, aes(x = spam, y = num_char)) +
+  geom_boxplot() + 
+  labs(title="# of Char.s vs. Spam", x="spam", y="Number of Characters (1000s)")
+p8 <- ggplot(data = email, aes(x = spam, fill = number)) +
+  geom_bar(position = "fill") +
+  labs(y = "Proportion", 
+       title = "Number vs. Spam") +
+  coord_flip()
+p7 + (p6 / p8)
+
+email %>%
+  group_by(spam) %>%
+  summarize(mean=mean(num_char),
+            IQR= IQR(num_char)) %>%
+  kable(format="markdown")
+
+email %>%
+  group_by(spam, to_multiple) %>%
+  summarize(count=n()) %>%
+  kable(format="markdown")
+
+email %>%
+  group_by(spam, number) %>%
+  summarize(count=n()) %>%
+  kable(format="markdown")
+```
+
+While the distribution of number of characters is skewed right for both spam and non-spam emails, the spam emails have a lower median number (5,439 vs. 11,250) and a lower IQR (2,818 vs. 13,582).
+
+There appear to be a lower proportion of spam emails that are sent to multiple recipients. 12 out 367 spam emails were sent to multiple recipients, while 608 out of 3554 non-spam emails were sent to multiple recipients.
+
+Comparing number, there appears to be a significantly higher proportion of spam emails with no number than the proportion of non-spam emails with no number. There also appears to be a significantly lower proportion of spam emails with a small number than non-spam emails with a small number. There appears to be a similar proportion of emails with a big number whether the email is spam or not.
+
+
+### Model & Drop-in-Deviance Test
+
+Now, I fit a model with to_mutiple and num_char as the predictor variables. I use a drop-in-deviance test to determine if number should be included in the model. 
+
+```{r models}
+m1 <- glm(spam ~ num_char + to_multiple, data = email, family = binomial)
+m2 <- glm(spam ~ num_char + to_multiple + number, data = email, family = binomial)
+tidy(m1, conf.int = TRUE, exponentiate = FALSE) %>%
+  kable(format = 'markdown', digits = 3)
+tidy(m2, conf.int = TRUE, exponentiate = FALSE) %>%
+  kable(format = 'markdown', digits = 3)
+```
+
+```{r dev-test}
+anova(m1, m2, test="Chisq")
+```
+
+As the p value of the deviance statistic is less than 0.01, I choose to use the model including number. The data suggest that at least one of the coefficients on the levels in the 'number' variable is significantly different from zero.
+
+```{r aug}
+spam_m <- augment(m2, type.predict = "response", type.residuals = "deviance")
+```
+
+### Assumptions 
+
+Now, I check the assumptions for this model.
+
+#### Linearity
+
+```{r lin1, fig.align='center'}
+arm::binnedplot(x=spam_m$.fitted, 
+                y=spam_m$.resid, 
+                xlab="Predicted Probabilities", 
+                main = "Binned Residual v. Predicted Values", 
+                col.int= FALSE)
+```
+
+```{r lin2}
+spam_m %>%
+  group_by(to_multiple) %>%
+  summarise(mean_resid = mean(.resid))
+```
+
+```{r lin3, fig.align='center'}
+arm::binnedplot(x=spam_m$num_char, 
+                y=spam_m$.resid, 
+                xlab="Number of Characters", 
+                main = "Binned Residual v. Number of Characters", 
+                col.int= FALSE)
+```
+
+```{r lin4}
+spam_m %>%
+  group_by(number) %>%
+  summarise(mean_resid = mean(.resid))
+```
+
+While the mean residuals across levels of number and to_multiple are similar and all approximately zero, the graphs of the residuals of the binned residuals vs. num_char and the binned residuals vs. the predicted probabilities have clear patterns (they do not appear randomly scattered), the linearity assumption is violated. However, I will continue with my analysis for now and might consider nonlinear transformations later.
+
+#### Independence
+
+These data are collected over three months in 2012, so I would have to graph the variables over time to be sure that the values of the analyzed variables for emails received close in time to each other are independent.
+
+#### Randomization
+
+I have no reason to believe that this sample is not representative of the broader population of emails this individual receives, so the randomization assumption is reasonably met.
+
+### Using the Model to Filter Spam
+
+Now, I make an ROC curve and calculate the AUC for the model.
+
+```{r, fig.align='center'}
+roc_curve <- spam_m %>%
+  ggplot(aes(d = as.numeric(spam) - 1, m = .fitted)) +
+  geom_roc(n.cuts = 10, labelround = 3) + 
+  geom_abline(intercept = 0) + 
+  labs(x = "False Positive Rate (1 - Specificity)", 
+       y = "True Positive Rate (Sensitivity)",
+       title = "ROC Curve for Spam")
+roc_curve
+calc_auc(roc_curve)$AUC
+```
+
+The AUC is 0.787.
+
+If I were a data scientist developing a spam filter, I might choose a threshold of 0.092. I would want to maximize the amount of spam emails that are counted as spam. However, I would not want many non-spam emails to be marked as spam, as the recipient may not see these emails or check this folder. As such, I choose a threshold that has a high sensitivity and a low false positive rate. The confusion matrix for such a threshold is displayed below.
+
+```{r mx}
+threshold <- 0.092
+spam_m %>%
+  mutate(spam_predict = if_else(.fitted > threshold, "1: Yes", "0: No")) %>%
+  group_by(spam, spam_predict) %>%
+  summarise(n = n()) %>%
+  kable(format="markdown")
+```

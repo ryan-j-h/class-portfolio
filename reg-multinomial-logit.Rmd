@@ -1,0 +1,271 @@
+---
+title: "Multinomial Logistic Regression"
+author: "Ryan Hastings"
+date: "April 2020"
+output: pdf_document
+---
+
+Homework from STA 210: Regression Analysis.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning=FALSE, 
+                      message=FALSE)
+```
+
+## Load packages and data
+
+```{r load-packages}
+library(tidyverse)
+library(knitr)
+library(broom)
+library(nnet)
+library(patchwork)
+library(arm)
+library(cowplot)
+```
+
+```{r}
+eyewitness <- read_csv("data/eyewitness.csv")
+```
+### Background 
+
+I will analyze data from the eye witness identification experiment in Carlson and Carlson (2014). In this experiment, participants were asked to watch a video of a mock crime (from the first person perspective), spend a few minutes completing a random task, and then identify the perpetrator of the mock crime from a line up shown on the screen. Every lineup in this analysis included the true perpetrator from the video. After viewing the line-up , each participant could make one of the following decisions (`id`):
+
+* `correct`: correctly identified the true perpetrator
+
+* `foil`: incorrectly identified the “foil”, i.e. a person who looks very similar to the perpetrator
+
+* `reject`: incorrectly concluded the true perpetrator is not in the lineup
+
+The main objective of the analysis is to understand how different conditions of the mock crime and suspect lineup affect the decision made by the participant. We will consider the following conditions to describe the decisions:
+
+* `lineup`: How potential suspects are shown to the participants
+
+    + `Simultaneous Lineup`: Participants were shown photos of all 6 potential suspects at the same time and were required to make a single decision (identify someone from the lineup or reject the lineup).
+
+    + `Sequential 5 Lineup`: Photos of the 6 suspects were shown one at a time. The participant was required to make a decision (choose or don’t choose) as each photo was shown. Once a decision was made, participants were not allowed to reexamine a photo. If the participant made an identification, the remaining photos were not shown. In each of these lineups the true perpetrator was always the 5th photo in the lineup.
+
+* `weapon`: Whether or not a weapon was present in the video of the mock crime.
+
+* `feature`: Whether or not the perpetrator had a distinctive marking on his face. In this experiment, the distinctive feature was a large “N” sticker on one cheek. (The letter “N” was chosen to represent the first author’s alma mater - University of Nebraska.)
+
+### Exploratory Data Analysis
+
+I begin by conducting exploratory data analysis to examine the relationship between the response variable (id) and each of the explanatory variables (lineup, weapon, and feature).
+
+```{r echo = F}
+ew <- read_csv("data/eyewitness.csv")
+p1 <- ggplot(data = ew, aes(x = id)) +
+  geom_bar() + 
+  labs(title = "Distribution of Decision", 
+       x = "id (Decision)")
+p2 <- ggplot(data = ew, aes(x = lineup)) +
+  geom_bar() + 
+  labs(title = "Distribution of Lineup", 
+       x = "Lineup")
+p3 <- ggplot(data = ew, aes(x = weapon)) +
+  geom_bar() + 
+  labs(title = "Distribution of Weapon", 
+       x = "Weapon")
+p4 <- ggplot(data = ew, aes(x = feature)) +
+  geom_bar() + 
+  labs(title = "Distribution of Feature", 
+       x = "Feature")
+cowplot::plot_grid(p1, p2, p3, p4, ncol = 2)
+```
+
+
+```{r}
+p1 <- eyewitness %>%
+  ggplot(aes(x= lineup, fill = id)) +
+  geom_bar(position = "fill") +
+  labs(x = "Lineup", fill = "ID (Decision)", title = "Decision vs. Lineup")
+p2 <- eyewitness %>%
+  ggplot(aes(x= weapon, fill = id)) +
+  geom_bar(position = "fill") +
+  labs(x = "Weapon", fill = "ID (Decision)", title = "Decision vs. Weapon") +
+  coord_flip()
+p3 <- eyewitness %>%
+  ggplot(aes(x= feature, fill = id)) +
+  geom_bar(position = "fill") +
+  labs(x = "Feature", fill = "ID (Decision)", title = "Decision vs. Feature") +
+  coord_flip()
+p1 + (p2 / p3)
+```
+
+```{r}
+eyewitness %>%
+  group_by(lineup, id) %>%
+  summarize(count = n()) %>%
+  kable(format = "markdown")
+```
+
+```{r}
+eyewitness %>%
+  group_by(weapon, id) %>%
+  summarize(count = n()) %>%
+  kable(format = "markdown")
+```
+
+```{r}
+eyewitness %>%
+  group_by(feature, id) %>%
+  summarize(count = n()) %>%
+  kable(format = "markdown")
+```
+
+Based on the univariate EDA, it appears that each of the predictor variables are approximately uniformly distributed. There are similar numbers of simultaneous and sequential 5 lineups, similar numbers of weapons and no weapons, and similar numbers of distinctive features and no distinctive features. This makes sense for a controlled experiment.
+
+Based on the bivariate plots, observations with no weapon appear to result in more identifications of the foil, compared with observations with a weapon. Observations with a distinctive feature appear to result in more identifications of the foil, compared with observations without a distinctive feature. Observations with a sequential 5 lineup  appear to result in more identifications of the foil, compared with observations with a simultaneous lineup.
+
+
+### Multinomial Logit Model
+
+I use the multinomial logistic regression model to predict `id` using `lineup`, `weapon` and `feature` because `id` is a categorical response variable with more than two levels - correct, foil, and reject.
+
+#### Main Effects 
+Next, I fit the multinomial logistic model that only includes main effects.
+
+```{r results="hide"}
+m1 <- multinom (id ~ lineup + weapon + feature, data = eyewitness)
+```
+```{r}
+tidy(m1, conf.int = TRUE, exponentiate = FALSE) %>%
+	kable (digits = 3, format = "markdown")
+```
+
+The baseline category for the response variable is "Correct".
+
+###### Interpreting the intercepts
+The predicted odds of choosing the foil versus choosing correctly is `r exp(1.063)` for an observation with a sequential 5 lineup, no weapon, no distinctive feature.
+
+The predicted odds of rejecting versus choosing correctly is `r exp(-0.199)` for an observation with a sequential 5 lineup, no weapon, no distinctive feature.
+
+###### Interpreting the coefficients for lineup
+The predicted odds of choosing the foil versus choosing correctly for a Simultaneous lineup is `r exp(-0.803)` times the odds for a Sequential 5 lineup, holding weapon and feature constant.
+
+The predicted odds of rejecting versus choosing correctly for a Simultaneous lineup is `r exp(-0.266)` times the odds for a Sequential 5 lineup, holding weapon and feature constant.
+
+#### Interaction Effects
+
+Now, I consider all possible interaction effects for the model. I use a drop-in deviance test to determine if there is at least one significant interaction effect.
+
+```{r results="hide"}
+m2 <- multinom (id ~ lineup + weapon + feature + lineup * weapon + weapon * feature + lineup * feature, data = eyewitness)
+```
+
+```{r}
+anova(m1, m2, test = "Chisq") %>%
+  kable(format = "markdown")
+```
+
+As the p-value of 0.028 is less than an alpha of 0.05, I reject the null hypothesis. There is sufficient evidence to suggest that at least one interaction effect is significant.
+
+```{r}
+tidy(m2, conf.int = FALSE, exponentiate = FALSE) %>%
+	kable (digits = 3, format = "markdown")
+```
+
+##### Interpretations
+
+If there was no weapon but the perpetrator had a distinctive feature in the mock crime, the predicted log-odds of reject vs. a correct ID increased  by `r -0.761 + 1.127` when there is a simultaneous lineup as opposed to a sequential lineup.
+
+If there was no weapon but the perpetrator had a distinctive feature in the mock crime, the predicted odds of reject vs. a correct ID multiply by a factor of `r exp(-0.761 + 1.127)` when there is a simultaneous lineup as opposed to a sequential lineup.
+
+The intercept describes observations with a sequential 5 lineup, no weapon, and no distinctive feature.
+
+### Model Assumptions
+
+Next, I assess the assumptions for the model.
+
+```{r include = F}
+eye.witness <- read_csv("data/eyewitness.csv")
+model2 <- multinom(id ~ lineup + weapon + feature + 
+                       lineup*weapon + lineup*feature + 
+                       weapon*feature,data=eye.witness)
+```
+
+```{r echo = F}
+#calculate residuals by ID type
+pred.probs <- data.frame(predicted = predict(model2,type="probs"))
+#indicator variables for decision type
+eye.witness <- eye.witness %>% 
+  mutate(correct = if_else(eye.witness$id=="correct",1,0),
+         foil = if_else(eye.witness$id=="foil",1,0),
+         reject = if_else(eye.witness$id=="reject",1,0))
+#residuals for each ID
+eye.witness <- eye.witness %>%
+  mutate(correct.resid = correct - pred.probs$predicted.correct,
+         foil.resid = foil - pred.probs$predicted.foil,
+         reject.resid = reject - pred.probs$predicted.reject)
+```
+
+
+```{r echo = F}
+par(mfrow=c(2,2))
+arm::binnedplot(x = pred.probs$predicted.correct, y = eye.witness$correct.resid, 
+                main = "Correct ID: Residuals vs. Pred. Prob.", 
+                xlab = "Predicted Probabilities", 
+                col.int = FALSE)
+arm::binnedplot(x = pred.probs$predicted.foil, y = eye.witness$foil.resid, 
+                main = "Foil ID: Residuals vs. Pred. Prob.",
+                xlab = "Predicted Probabilities",
+                col.int = FALSE)
+arm::binnedplot(x = pred.probs$predicted.reject, y = eye.witness$reject.resid, 
+                main = "Reject ID: Residuals vs. Pred. Prob.",
+                xlab = "Predicted Probabilities",
+                col.int = FALSE)
+```
+
+```{r echo = F}
+#average residuals by ID and lineup 
+eye.witness %>% group_by(lineup) %>%
+  summarise(correct.avg = mean(correct.resid),
+            foil.avg = mean(foil.resid),
+            reject.avg=mean(reject.resid))  %>%
+  
+  kable(format = "markdown")
+eye.witness %>% group_by(weapon) %>%
+  summarise(correct.avg = mean(correct.resid),
+            foil.avg = mean(foil.resid),
+            reject.avg=mean(reject.resid)) %>%
+  kable(format = "markdown")
+
+eye.witness %>% group_by(feature) %>%
+  summarise(correct.avg = mean(correct.resid),
+            foil.avg = mean(foil.resid),
+            reject.avg=mean(reject.resid)) %>%
+  kable(format = "markdown")
+```
+
+##### Linearity
+The plots of the residuals vs. the predicted probabilities for each level of the response variable do not have any obvious pattern. Additionally, the average residuals across categories of each predictor are all approximately zero. Therefore, the linearity assumption is reasonably met.
+
+##### Independence
+One person's identification decision should have no impact on another person's decision. Therefore, the independence assumption is met.
+
+##### Randomization
+There is no reason to believe that the test subjects are not representative of the population. As this is an experiment, the participants are likely randomly classified into their treatments. Therefore, the randomization assumption is reasonably met.
+
+### Decision Analysis
+
+Now, I use the model to predict the decision made by each participant and make a table of the predicted vs.the actual decisions.
+
+To determine the prediction, R calculates the probabilities of each outcome for a given vector of predictor values. For reject, this probability is calculated by dividing the predicted odds of reject versus correct by the quantity one plus the predicted odds of reject vs. correct plus the predicted odds of foil vs. correct. For foil, the process is similar, switching foil and reject. To find the probability of correct, subtract the probabilities of foil and reject from one. Then, we predict the category with the highest probability.
+
+```{r}
+m2_aug <- eyewitness %>%
+	mutate (pred = predict(m2, type = "class"))
+```
+
+```{r}
+table(m2_aug$id, m2_aug$pred) %>%
+  kable(format = "markdown")
+```
+
+```{r}
+(147 + 81 + 44 + 147) / 886
+```
+
+The misclassification rate is 0.472.

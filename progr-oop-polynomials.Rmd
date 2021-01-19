@@ -1,0 +1,202 @@
+---
+title: "Polynomial Class"
+author: "Ryan Hastings, Mishek Thapa"
+date: "May 27th, 2020"
+output: html_document
+---
+
+Assignment for STA 323: Statistical Programming
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment = NA)
+```
+
+In this assignment, we create a class of polynomials using the `S3` object-oriented programming environment in `R`. A polynomial is 
+constructed from two numeric vectors, one of coefficients and another of their 
+respective powers.
+
+
+### Class Description
+We created a class of polynomials. A polynomial is constructed from a numeric 
+vector of coefficients and uses its two attributes: the class, polynomial 
+and powers, a numeric vector of each coefficient's respective power. The helper 
+function here converts inputs of strings into numerical vectors for the user and
+helps uncover some invalid inputs by creating NAs.
+
+These two components of the constructor were supplemented with the validity 
+checks in the validator function. The inputs that were filtered for: vectors 
+with NA values, infinite values, and inputs that are not numbers. This step 
+is significant because it gets rid of any non-real number inputs that could 
+have been entered (characters, symbols, imaginary numbers). Another validity 
+check was the check to make sure each vector (coefficient and power) were 
+the same length.
+
+### Functions
+Our constructor function:
+
+```{r constructor}
+new_polynomial <- function(x = double(), y = double()) {
+  
+  # assign attributes to coefficient vector x
+  structure(x, 
+            powers = y,
+            class = "polynomial")
+}
+```
+
+
+Our validator function: 
+
+```{r validator}
+validate_polynomial <- function(x) {
+  
+  values <- unclass(x) #get the underlying base classes
+  pow <-  attr(values,"powers")
+  
+  if (any(is.na(values)) | any(is.nan(values)) | any(is.infinite(values))) {
+    stop("Coefficients are either infinite, not a number, or not available",call. = FALSE)
+  }
+  
+  if (any(is.na(pow)) | any(is.nan(pow)) | any(is.infinite(pow))) {
+    stop("Powers are either infinite, not a number, or not available", call. = FALSE)
+  }
+  
+  if(length(x) != length(attr(x,"powers"))) {
+    stop("The quantity of coefficients must be the same as the quantity of powers",call. = FALSE)
+  }
+  
+  return(x)
+}
+```
+
+
+Our helper function:
+
+```{r helper}
+polynomial <- function(x, y = 0:(length(x)-1)){
+  
+  # coerce inputs to type numeric
+  x <- suppressWarnings(as.numeric(x))
+  y <- suppressWarnings(as.numeric(y))
+  
+  # input into validator and constructor
+  validate_polynomial(new_polynomial(x, y))
+  
+}
+```
+
+### Methods
+
+The combination of these two components of the class allow for building upon
+a few generic functions, specifically the print and the plot function. These 
+two functions cycled through the two vectors to produce their output. First, the 
+print function cycles through the elements of each vector in order and writes
+one element of the expression and uses the paste function to combine the compo-
+nents of the equations. The plot function creates a domain of x values to compute 
+into the polynomial (can be defined by user), then cycles through each element
+of the polynomial (like the print function) and adds them to compute each value
+in the function, then plots all the points. 
+
+The print function itself does not have any validation stop points because the 
+polynomial function already has them, but the plot function includes a few additional.
+Variables that specify the domain of the plot (lower, upper, step) that are infinite, not a 
+number, or non-numeric are excluded inside this function. 
+
+
+Our `print` method:
+
+```{r print-polynomial}
+print.polynomial <- function(x, ...) {
+  
+  # create a string displaying coefficients and their powers
+  str <- paste(as.character(x), 
+               " * x ^ ", 
+               as.character(attr(x, "powers")),
+               sep = "", 
+               collapse = " + ")
+  
+  str <- paste("f(x) = ", str)
+  print(str, ...)
+}
+```
+
+
+Our `plot` method:
+
+```{r plot-polynomial}  
+plot.polynomial <- function(poly, 
+                            lower = -5, # lower bound of region displayed
+                            upper =  5, # upper bound of region displayed
+                            step  = .1, # distance between each point evaluated
+                            main  = "Polynomial Plot",
+                            ylab  = "f(x)",
+                            sub = print(poly),
+                            type = "l",
+                            ...) {
+  
+  #validation; stopifnot produces interpretable messages here
+  stopifnot(attr(poly, "class") == "polynomial",
+            is.numeric(lower),
+            is.numeric(upper),
+            is.numeric(step),
+            !is.infinite(lower),
+            !is.infinite(upper),
+            !is.nan(lower),
+            !is.nan(upper))
+  
+  # create function to evaluate a polynomial at a point
+  eval_poly <- function(poly, num) {
+  
+    value <- 0
+    
+    for (i in 1:length(poly)) {
+      value <- value + poly[i] * (num ^ (attr(poly, "powers")[i]))
+    }
+    
+    return(value)
+    }
+  # generate function inputs and outputs to be plotted
+  x <- seq(lower, upper, step)
+  y <- eval_poly(poly, x)
+  
+  # plot using specified settings
+  plot(x, y, main = main, ylab = ylab, sub = sub, type = type, ...)
+}
+```
+
+### Usability and Robustness
+By building on these generic functions with this class, the user can also use optional
+features for each of these functions like different types of plotting styles for example.
+This makes the function very robust and easy to use. A downside of this 
+function is that the function takes in coefficients and powers separately. This
+is not a very typical way of representing a polynomial, but it permits an efficient 
+way to process the inputs. After understanding the input format though, the methods 
+this class allows for are useful and very easy to use.  
+
+Examples:
+
+```{r valid_inputs, error = TRUE}
+m <- polynomial(1, 2)
+attributes(m)
+print(m)
+plot(m)
+j <- polynomial(1:5, 5:9)
+print(j)
+plot(j)
+n <- polynomial(pi)
+print(n)
+plot(n, lower = 0, upper = 8, main = "Pi", type = "p")
+k <- polynomial(c(1, 3, 4, 2), c(-2:0, 1.4)) 
+print(k)
+plot(k, lower = 0.1, step = 0.1)
+a <- polynomial(0.5, -1)
+print(a)
+plot(a, step = 0.1)
+```
+
+
+
+
+
+
+
